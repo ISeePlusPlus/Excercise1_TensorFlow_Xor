@@ -11,81 +11,75 @@ def print_details(k, curr_w1, curr_b1, curr_w2, curr_b2, curr_out, curr_loss):
     print("Loss: ", curr_loss)
 
 
-def two_dimensional_xor(x_dim2, k):
+def two_dimensional_xor(x, k, bypass_flag, learning_rate):
 
     dim = 2
     nb_hidden = k
     nb_outputs = 1
-    temperature = 0.001      # cold temperature (sharp slop of the sigmoid
-    x_train = x_dim2
+    temperature = 1
+    x_train = x
     y_train = [[0.], [1.], [1.], [0.]]
 
     x = tf.placeholder(tf.float32, [None, dim])
-    y = tf.placeholder(tf.float32, [None, nb_outputs])
-    w1 = tf.Variable(tf.random_uniform([dim, nb_hidden], -1, 1, seed=0))
-    w2 = tf.Variable(tf.random_uniform([nb_hidden, nb_outputs], -1, 1, seed=0))
+    target = tf.placeholder(tf.float32, [None, nb_outputs])
+
+    w1 = tf.Variable(tf.random_uniform([dim, nb_hidden], -1., 1., seed=0))
     b1 = tf.Variable(tf.zeros([nb_hidden]), name="Biases1")
     b2 = tf.Variable(tf.zeros([nb_outputs]), name="Biases2")
     z1 = tf.matmul(x, w1) + b1
-    hlayer = tf.sigmoid(z1/temperature)
-    z2 = tf.matmul(hlayer, w2) + b2
+    h_layer = tf.sigmoid(z1 / temperature)
+
+    if bypass_flag:
+        w2 = tf.Variable(tf.random_uniform([dim + nb_hidden, nb_outputs], -1., 1., seed=0))
+        h_layer = tf.concat([h_layer, x], 1)
+    else:
+        w2 = tf.Variable(tf.random_uniform([nb_hidden, nb_outputs], -1., 1., seed=0))
+
+    z2 = tf.matmul(h_layer, w2) + b2
     out = tf.sigmoid(z2/temperature)
 
-    # loss function
-    target = tf.compat.v1.placeholder(tf.float32)
-    squared_deltas = tf.square(out - target)
-    loss = tf.reduce_sum(squared_deltas)
+    # loss function : crossEntropy
+    loss = -tf.reduce_sum(target * tf.log(out) + (1. - target) * tf.log(1. - out))
 
-    sess = tf.Session()
+    optimizer = tf.compat.v1.train.GradientDescentOptimizer(learning_rate)
+    train = optimizer.minimize(loss)
+
+    # validation group
+    x_validation = [[0., 0.], [0., 1.], [1., 0.], [1., 1.], [1., 0.1], [1., 0.9], [0.9, 0.9], [0.1, 0.9]]
+    y_validation = [[0.], [1.], [1.], [0.], [1.], [0.], [0.], [1.]]
+
     init = tf.global_variables_initializer()
-    sess.run(init) # initialize variables
-    curr_w1, curr_b1, curr_w2, curr_b2, curr_out, curr_loss = \
-        sess.run([w1, b1, w2, b2, out, loss], {x:x_train,  target: y_train})
-    print("Before assignment: ")
-    print_details(k, curr_w1, curr_b1, curr_w2, curr_b2, curr_out, curr_loss)
+    sess = tf.Session()
+    sess.run(init)
 
-    # k can be any number, for this exercise we use 4, 2 and 1. also can be any dimension, for this exercise it is 2
+    max_epochs = 40000
+    min_dict_size = 2
+    improvement_barrier = 0001.0
+    improvement_barrier_number = 10
+    loss_barrier = 0.2
+    loss_dict = {}
+    counter = 0
 
-    if nb_hidden == 4:
-        fix_w1 = [[-1., -1.], [-1., 1.], [1., -1.], [1., 1.]]
-        # transpose messes up the print a bit as w1 is printed transposed, this is correct w1 vector before transpose
-        fix_w1 = tf.transpose(fix_w1)
-        fix_w1 = tf.compat.v1.assign(w1, fix_w1)
-        fix_w2 = tf.compat.v1.assign(w2, [[-1.], [1.], [1.], [-1.]])
-        fix_b1 = tf.compat.v1.assign(b1, [0.5, -.5, -.5, -1.5])
-        fix_b2 = tf.compat.v1.assign(b2, [-.5])
-    elif nb_hidden == 2:
-        fix_w1 = tf.compat.v1.assign(w1, [[-1., 1.], [1., -1.]])
-        fix_w2 = tf.compat.v1.assign(w2, [[1.], [1.]])
-        fix_b1 = tf.compat.v1.assign(b1, [-.5, -.5])
-        fix_b2 = tf.compat.v1.assign(b2, [-.5])
-    else:  # nb_hidden = 1
-        w2 = tf.Variable(tf.random_uniform([dim + nb_hidden, nb_outputs], -1, 1,  seed=0))
-        hlayer1 = tf.concat([hlayer, x], 1)
-        init = tf.global_variables_initializer()
-        sess.run(init)
-
-        # Overriding previous declarations
-        z2 = tf.matmul(hlayer1, w2) + b2
-        out = tf.sigmoid(z2/temperature)
-        squared_deltas = tf.square(out - target)
-        loss = tf.reduce_sum(squared_deltas)
-
-        fix_w1 = tf.compat.v1.assign(w1, [[1.], [1.]])
-        fix_w2 = tf.compat.v1.assign(w2, [[-2], [1.], [1.]])
-        fix_b1 = tf.compat.v1.assign(b1, [-1.5])
-        fix_b2 = tf.compat.v1.assign(b2, [-.5])
-        sess.run([fix_w1, fix_b1, fix_w2, fix_b2, out, loss], {x: x_train, target: y_train})
-
-    curr_w1, curr_b1, curr_w2, curr_b2, curr_out, curr_loss = \
-        sess.run([fix_w1, fix_b1, fix_w2, fix_b2, out, loss], {x: x_train,  target: y_train})
-    print("After assignment: ")
-    print_details(k, curr_w1, curr_b1, curr_w2, curr_b2, curr_out, curr_loss)
+    for i in range(max_epochs):
+        curr_train, curr_loss = sess.run([train, loss], {x: x_train, target: y_train})
+        out_validation, loss_validation = sess.run([out, loss], {x: x_validation, target: y_validation})
+        if loss_validation < loss_barrier:
+            loss_dict[i] = loss_validation
+            if len(loss_dict) >= min_dict_size:
+                if loss_dict[i-1] - loss_dict[i] < improvement_barrier:
+                    counter += 1
+                    if counter is improvement_barrier_number:
+                        print(i)
+                        break
+                else:
+                    counter = 0
 
 
 # exercise 1 involves only n = 2
 x_dim2 = [[0., 0.], [0., 1.], [1., 0.], [1., 1.]]
+bypass = True
+option_learning_rate = 0.1
 
-two_dimensional_xor(x_dim2, 4)
-two_dimensional_xor(x_dim2, 2)
-two_dimensional_xor(x_dim2, 1)
+two_dimensional_xor(x_dim2, 4, False, option_learning_rate)
+two_dimensional_xor(x_dim2, 2, False, option_learning_rate)
+two_dimensional_xor(x_dim2, 1, bypass, option_learning_rate)
